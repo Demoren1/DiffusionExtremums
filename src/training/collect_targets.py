@@ -334,6 +334,12 @@ def _collect_shard_worker(
     shard_indices = shards[rank]
     # Pin to this GPU BEFORE any CUDA operation. In a freshly-spawned process no
     # CUDA context exists yet, so this takes effect and "cuda" -> this GPU.
+    # NOTE: this MUST be the first CUDA-related action in the child process.
+    # Importing modules that call ``torch.cuda.is_available()`` at import time
+    # (e.g. a module-level ``DEFAULT_DEVICE = torch.device("cuda" if ...)``)
+    # would initialize the CUDA runtime here *before* this line, binding the
+    # context to physical GPU 0 and making the env var below a no-op. The
+    # ``train_mlp`` module avoids this by computing its default device lazily.
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[rank])
 
     codec = WeightCodec(L=config.L, H=config.H)

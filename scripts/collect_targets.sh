@@ -31,6 +31,7 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate myenv
+cd /home/udeneev-av/DiffusionExtremums
 
 # -----------------------------------------------------------------------------
 # Параметры корпуса (датасеты и MLP-инициализации)

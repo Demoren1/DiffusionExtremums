@@ -43,7 +43,31 @@ from src.models.weight_codec import WeightCodec
 from src.utils.seeding import set_seed
 
 # Default device: use CUDA when available so the GPU does the work.
-DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#
+# IMPORTANT: this is computed *lazily* (on first call to ``resolve_device`` with
+# ``device="auto"``), NOT at module import time. A module-level
+# ``DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() ...)``
+# would call ``torch.cuda.is_available()`` during import, which initializes the
+# CUDA runtime in the importing process. In the multi-GPU target-collection
+# pipeline (``src.training.collect_targets._collect_shard_worker``) each spawned
+# worker re-imports this module; if that import initialized CUDA *before* the
+# worker set ``CUDA_VISIBLE_DEVICES``, the CUDA context would bind to physical
+# GPU 0 and the per-worker env-var pinning would silently fail (every worker
+# would run on GPU 0). Deferring the call to first use keeps the import
+# CUDA-free, so the worker can pin itself first.
+_DEFAULT_DEVICE: Optional[torch.device] = None
+
+
+def _default_device() -> torch.device:
+    """Return (and cache) the default device: CUDA if available, else CPU.
+
+    Computed lazily so importing this module does not initialize CUDA.
+    """
+    global _DEFAULT_DEVICE
+    if _DEFAULT_DEVICE is None:
+        _DEFAULT_DEVICE = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
+    return _DEFAULT_DEVICE
 
 
 @dataclass(frozen=True)
@@ -99,7 +123,7 @@ class TrainConfig:
 
     def resolve_device(self) -> torch.device:
         if self.device == "auto":
-            return DEFAULT_DEVICE
+            return _default_device()
         return torch.device(self.device)
 
 

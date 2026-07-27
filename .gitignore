@@ -1,0 +1,99 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ===== Virtual environments =====
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+*.ipynb_checkpoints
+
+# ===== Data (large, not tracked) =====
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# ===== Results / outputs (not tracked) =====
+results/*
+!results/.gitkeep
+
+# ===== Figures (uncomment to ignore) =====
+# figures/*
+# !figures/.gitkeep
+
+# ===== Trash / scratch (not tracked) =====
+trash/*
+!trash/.gitkeep
+
+# ===== Model checkpoints / large binaries =====
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.h5
+*.pkl
+*.npy
+*.npz
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Editors / IDEs =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== LaTeX build artifacts =====
+tex/*.aux
+tex/*.bbl
+tex/*.blg
+tex/*.fdb_latexmk
+tex/*.fls
+tex/*.log
+tex/*.out
+tex/*.synctex.gz
+tex/*.toc
+tex/*.lof
+tex/*.lot
+tex/*.nav
+tex/*.snm
+tex/*.vrb
+
+# ===== Screenshots (uncomment to ignore) =====
+# screenshots/*
+# !screenshots/.gitkeep
