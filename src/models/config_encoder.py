@@ -1,11 +1,11 @@
 """Config-feature encoder: dataset config -> fixed-dim feature vector -> embedding.
 
-This is the **conditioning path** of the diffusion hypernetwork (plan Section 3.3).
-The diffusion model generates MLP weights conditioned on the *dataset
-configuration* (family, kernel, radius, noise_std). Encoding the config as a
-fixed feature vector (rather than a learned per-ID embedding table) enables
-**zero-shot generalization to held-out dataset IDs**: any config, seen or
-unseen, maps to a conditioning embedding through the same encoder.
+This is the **conditioning path** of the effective-map regressor: the model
+predicts the effective map from the *dataset configuration* (family, kernel,
+radius, noise_std). Encoding the config as a fixed feature vector (rather than
+a learned per-ID embedding table) enables **zero-shot generalization to
+held-out dataset IDs**: any config, seen or unseen, maps to a conditioning
+embedding through the same encoder.
 
 Feature layout (14-dim, per plan Section 3.3, ``dim = 5 + 7 + 1 + 1 = 14``)::
 
@@ -41,10 +41,9 @@ Fields NOT used as conditioning (and why):
 - ``L``: fixed at 32 (the MLP input length); constant, no conditioning signal.
 
 The encoder is a small MLP ``[14, 64, 128]`` (SiLU activations) producing a
-128-dim conditioning embedding ``c`` that modulates the denoiser via FiLM
-(see ``src/models/diffusion.py``).
+128-dim conditioning embedding ``c``.
 """
-from typing import Dict, List, Sequence, Union
+from typing import Dict, Sequence, Union
 
 import torch
 import torch.nn as nn
@@ -166,14 +165,13 @@ class ConfigEncoder(nn.Module):
     """MLP that maps the 14-dim config feature vector to a conditioning embedding.
 
     Architecture (plan Section 3.3): ``MLP([14, 64, 128])`` with SiLU
-    activations. Produces a 128-dim embedding ``c`` used for FiLM modulation of
-    the denoiser.
+    activations. Produces a 128-dim conditioning embedding ``c``.
 
     Args:
         feature_dim: Input feature dimension (default ``CONFIG_FEATURE_DIM``=14).
         hidden_dim: Hidden width of the encoder MLP (default 64).
-        embed_dim: Output embedding dimension (default 128; must match the
-            denoiser's expected conditioning dimension).
+        embed_dim: Output embedding dimension (default 128; the conditioning
+            dimension consumed by the downstream model).
     """
 
     def __init__(self, feature_dim: int = CONFIG_FEATURE_DIM,

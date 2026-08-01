@@ -2,9 +2,8 @@
 
 Phase 2 (Approach B): for each dataset ID in a corpus, train ``n_mlp`` MLPs
 (different random initializations) to convergence and save their flattened
-converged weight vectors. These weight vectors are the **training targets for
-the diffusion model** (Phase 3+): the diffusion model learns to generate this
-distribution of converged weights conditioned on the dataset ID / config.
+converged weight vectors. These weight vectors are the **regression targets**
+for the effective-map regressor pipeline.
 
 Output format (documented in the saved ``metadata.json``):
 - ``weights.pt``: tensor of shape ``(n_datasets, n_mlp, D)`` float32, where
@@ -15,7 +14,7 @@ Output format (documented in the saved ``metadata.json``):
   ``(train_mse, val_mse, test_mse)`` for each converged MLP.
 - ``configs.json``: list of dataset configs (one per dataset), each a dict with
   family, kernel, radius, noise_std, n_train, n_test, seed, L, and dataset_id.
-  These are the conditioning inputs for the diffusion model.
+  These are the conditioning inputs for the model.
 - ``dataset_ids.json``: list of dataset_id strings (parallel to axis 0).
 - ``metadata.json``: full description of the format, the weight vectorization
   order, the generation/training parameters, and the codec dimensions.
@@ -37,7 +36,7 @@ original sequential single-device path is used. Resumability is per-shard
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -169,9 +168,9 @@ def _write_metadata(
     meta = {
         "format_version": 1,
         "description": (
-            "Converged MLP weights as diffusion targets (Phase 2, Approach B). "
+            "Converged MLP weights as regression targets (Phase 2, Approach B). "
             "For each dataset, n_mlp MLPs (different random inits) were trained "
-            "to convergence; their flattened weights are the diffusion targets."),
+            "to convergence; their flattened weights are the targets."),
         "files": {
             "weights.pt": "float32 tensor [n_datasets, n_mlp, D] of converged "
                           "weight vectors (canonical flatten order).",

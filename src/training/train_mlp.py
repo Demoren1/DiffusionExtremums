@@ -1,9 +1,8 @@
 """Train a single MLP to convergence on a 1D regression dataset (Phase 2, Approach B).
 
-Phase 2 collects *converged MLP weights* as diffusion targets. For each dataset
+Phase 2 collects *converged MLP weights* as regression targets. For each dataset
 ID we train multiple MLPs (different random initializations) to convergence and
-save their flattened weight vectors. The diffusion model (Phase 3+) later learns
-to generate this distribution of converged weights conditioned on the dataset ID.
+save their flattened weight vectors.
 
 Why this works as a target distribution (Approach B):
 - The ground-truth map y = T_k x is linear, and the MLP is linear
@@ -11,12 +10,12 @@ Why this works as a target distribution (Approach B):
   ``W2 @ W1`` (plus biases). With n_train=1024 >> L=32 the per-output
   least-squares system is well-determined -> the MLP generalizes well (low test
   MSE, close to the conv/oracle baseline). This makes the converged weights
-  *good solutions* worth learning to generate.
+  *good solutions* worth collecting as targets.
 - The factorization ``W2 @ W1`` of the (unique) effective matrix is *non-unique*
   (gauge freedom: ``W1 -> G W1``, ``W2 -> W2 G^{-1}`` for invertible G). So
   different random initializations converge to *different* weight vectors that
-  implement (approximately) the same map. This gives the diffusion model a rich
-  target distribution to learn, not a single point.
+  implement (approximately) the same map. This gives the target collection a
+  rich weight distribution, not a single point.
 
 Convergence strategy:
 - AdamW + full-batch MSE (datasets are tiny: n_train=1024, L=32).
@@ -134,7 +133,7 @@ class TrainResult:
     Attributes:
         theta: Flattened converged weight vector, shape ``[D]`` (8352), on CPU,
             float32, in the canonical order (fc1.weight, fc1.bias, fc2.weight,
-            fc2.bias, C-order). This is the diffusion target.
+            fc2.bias, C-order). This is the regression target.
         train_mse: Final MSE on the (internal) training split.
         val_mse: Best validation MSE observed (used for early stopping).
         test_mse: MSE on the provided test set (generalization to new inputs).

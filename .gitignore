@@ -21,6 +21,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+AGENTS.md
+src/smoke
 
 # ===== Virtual environments =====
 .venv/

@@ -1,7 +1,7 @@
 """Smoke test for Phase 2: MLP target collection (Approach B).
 
 Verifies that the converged MLP weights collected by the Phase 2 pipeline are
-good diffusion targets. Specifically, on a small subset of datasets it checks:
+good regression targets. Specifically, on a small subset of datasets it checks:
 
 (a) **Convergence**: MLPs reach low train MSE (the optimization actually
     converges, not stuck at a high loss).
@@ -13,7 +13,7 @@ good diffusion targets. Specifically, on a small subset of datasets it checks:
 (c) **Weight diversity**: different random initializations converge to
     *different* weight vectors (pairwise L2 distance / per-dim variance well
     above zero). This is the gauge freedom of the (W1, W2) factorization and is
-    what gives the diffusion model a rich target distribution to learn.
+    what gives the target collection a rich weight distribution.
 (d) **Well-behaved weights**: the weight vectors are finite and have a
     reasonable scale (norm).
 
@@ -400,7 +400,7 @@ def main() -> int:
     if all_ok:
         print("PHASE 2 SMOKE TEST PASSED: MLPs converge, generalize well (test MSE "
               "close to conv baseline), and different inits give diverse weights.")
-        print("The collected weight vectors are valid diffusion targets.")
+        print("The collected weight vectors are valid regression targets.")
         return 0
     print("PHASE 2 SMOKE TEST FAILED: one or more validation gates did not pass.")
     return 1

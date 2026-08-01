@@ -1,8 +1,8 @@
-"""Training package: MLP training-to-convergence and target collection.
+"""Training package: MLP training-to-convergence, target collection, and the
+effective-map regressor training loop.
 
 Phase 2 (Approach B): train many MLPs (different random initializations) to
-convergence on generated 1D datasets and collect their converged weights as
-diffusion targets.
+convergence on generated 1D datasets and collect their converged weights.
 """
 from src.training.train_mlp import TrainConfig, TrainResult, train_mlp_to_convergence
 

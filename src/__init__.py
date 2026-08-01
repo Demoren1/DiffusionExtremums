@@ -1,6 +1,4 @@
-"""Diffusion Meta-Learner for Convolution-Inductive-Bias MLP Weight Generation.
+"""Effective-map regressor: data generation, target collection, training, evaluation.
 
-Phase 1: 1D data generation module + smoke tests.
-
-See ``plans/plan.md`` for the full technical specification.
+See ``plans/plan_ru.md`` for the full technical specification.
 """

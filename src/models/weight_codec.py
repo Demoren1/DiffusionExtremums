@@ -1,8 +1,9 @@
-"""Canonical weight vectorization for the target MLP (the diffusion data dim).
+"""Canonical weight vectorization for the target MLP.
 
-The diffusion model operates on a single flat vector ``theta in R^D`` that is
-reshaped into the MLP's parameters. This module defines the **fixed, documented
-ordering** (plan Section 2.4) and provides ``pack`` / ``unpack`` / ``instantiate``.
+The regressor pipeline operates on a single flat vector ``theta in R^D`` that
+is reshaped into the MLP's parameters. This module defines the **fixed,
+documented ordering** (plan Section 2.4) and provides ``pack`` / ``unpack`` /
+``instantiate``.
 
 Canonical ordering (C-order / row-major, matching PyTorch ``nn.Linear`` storage):
 
@@ -24,7 +25,7 @@ Reshape spec (row-major / C-order):
 
 A single ``WeightCodec`` handles ``pack(params_dict) -> theta`` and
 ``unpack(theta) -> params_dict`` and ``instantiate(theta) -> MLPModel``.
-``D = 8352`` is the diffusion model's data dimension.
+``D = 8352`` is the MLP weight-vector dimension.
 """
 from typing import Dict, List, Tuple
 
@@ -137,3 +138,29 @@ class WeightCodec:
         for p in model.parameters():
             p.requires_grad_(False)
         return model
+
+
+def instantiate_mlp(
+    weights: torch.Tensor,
+    L: int = 32,
+    H: int = 128,
+) -> MLPModel:
+    """Instantiate an ``MLPModel`` from a flat weight vector.
+
+    Uses ``WeightCodec.instantiate`` to build the model and load the weights.
+    The returned model is in eval mode with ``requires_grad=False`` (ready for
+    evaluation, not further training).
+
+    Args:
+        weights: ``[D]`` or ``[1, D]`` flat weight vector (8352-dim).
+        L, H: MLP dimensions (default 32, 128).
+
+    Returns:
+        An ``MLPModel`` on the same device/dtype as ``weights``, in eval mode.
+    """
+    codec = WeightCodec(L=L, H=H)
+    w = weights.reshape(-1)
+    if w.numel() != codec.D:
+        raise ValueError(
+            f"weights has {w.numel()} elements, expected D={codec.D}")
+    return codec.instantiate(w)

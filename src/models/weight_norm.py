@@ -1,26 +1,23 @@
-"""Per-dimension weight standardization for diffusion targets.
+"""Per-dimension standardization of target vectors.
 
-Diffusion models assume data ``z_0 ~ N(0, 1)`` (roughly). Raw converged MLP
-weight vectors ``theta in R^D`` (``D = 8352``) are not standardized: their
-per-dimension mean and scale vary widely, and some dimensions are (near-)
-constant (e.g. the identity/zeros blocks in the analytic Toeplitz target, or
+Regression targets (effective maps) are not standardized: their per-dimension
+mean and scale vary widely, and some dimensions are (near-)constant (e.g.
 gauge-frozen dimensions of the learned MLP targets).
 
 This module computes per-dimension mean ``mu`` and std ``sigma`` over a corpus
-of target weight vectors and provides the standardize / destandardize
-transforms (plan Section 2.5)::
+of target vectors and provides the standardize / destandardize transforms
+(plan Section 2.5)::
 
-    z = (theta - mu) / sigma        # standardize  (diffusion operates on z)
-    theta = sigma * z + mu          # destandardize (decode sampled z back to weights)
+    z = (theta - mu) / sigma        # standardize
+    theta = sigma * z + mu          # destandardize (back to raw space)
 
 Constant dimensions (``std == 0``) are handled by setting ``sigma = 1`` and
-``mu = <constant>`` so that ``z = 0`` there (the diffusion model learns these
-are trivial, always-zero dimensions). This both avoids division by zero and
-reduces the effective dimensionality the model must learn.
+``mu = <constant>`` so that ``z = 0`` there. This both avoids division by zero
+and reduces the effective dimensionality the model must learn.
 
-The statistics are computed once from the training corpus (Phase 4) and stored
-alongside the model checkpoint. This module is a pure, device-agnostic
-container (no learnable parameters) so it can be saved/loaded trivially.
+The statistics are computed once from the training corpus and stored alongside
+the model checkpoint. This module is a pure, device-agnostic container (no
+learnable parameters) so it can be saved/loaded trivially.
 """
 from typing import Dict, Optional
 
@@ -35,7 +32,7 @@ class WeightNormalizer:
     """Per-dimension standardization of weight vectors.
 
     Holds non-learnable statistics ``mu, sigma in R^D`` and transforms between
-    raw weight space ``theta`` and standardized diffusion space ``z``.
+    raw space ``theta`` and standardized space ``z``.
 
     Args:
         D: Weight-space dimension (default 8352, the MLP param count).
@@ -122,7 +119,7 @@ class WeightNormalizer:
         return self
 
     def standardize(self, theta: torch.Tensor) -> torch.Tensor:
-        """Map raw weights ``theta`` to standardized diffusion space ``z``.
+        """Map raw weights ``theta`` to standardized space ``z``.
 
         Args:
             theta: ``[..., D]`` raw weight vectors.

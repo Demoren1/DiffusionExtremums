@@ -1,4 +1,4 @@
-"""CLI: collect converged MLP weights as diffusion targets (Phase 2, Approach B).
+"""CLI: collect converged MLP weights as regression targets (Phase 2, Approach B).
 
 Generates a corpus of datasets, trains ``n_mlp`` MLPs (different random inits)
 per dataset to convergence, and saves the flattened converged weight vectors
@@ -23,6 +23,7 @@ Run with the conda env activated:
     source ~/miniconda3/etc/profile.d/conda.sh && conda activate myenv
 """
 import argparse
+import os
 import sys
 
 import torch
@@ -32,8 +33,9 @@ from src.training.train_mlp import TrainConfig
 
 
 def parse_args(argv=None) -> argparse.Namespace:
+    """Parse CLI arguments."""
     p = argparse.ArgumentParser(
-        description="Collect converged MLP weights as diffusion targets "
+        description="Collect converged MLP weights as regression targets "
                     "(Phase 2, Approach B).")
     # Corpus
     p.add_argument("--n-datasets", type=int, default=2000,
@@ -83,6 +85,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def main(argv=None) -> int:
+    """Run the target-collection pipeline."""
     args = parse_args(argv)
 
     families = None
@@ -100,7 +103,6 @@ def main(argv=None) -> int:
         device = args.device
         if len(gpu_ids) == 1:
             # Pin the single GPU via CUDA_VISIBLE_DEVICES for consistency.
-            import os
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
             device = "cuda" if torch.cuda.is_available() else args.device
             print(f"[collect_targets] single-GPU: gpu {gpu_ids[0]}")
