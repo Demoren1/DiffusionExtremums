@@ -54,13 +54,63 @@ from src.evaluation._shared import (
     sample_eval_config_indices,
     stats_of,
 )
-from src.models.effective_map import (
-    DEFAULT_H,
-    DEFAULT_L,
-    effective_map_to_matrix,
-    kernel_to_effective_map,
-)
 from src.smoke.models import Conv1dModel
+
+
+# Default MLP dimensions (must match src/models/mlp.py and weight_codec.py).
+DEFAULT_L: int = 32
+DEFAULT_H: int = 128
+
+
+def kernel_to_effective_map(
+    kernel: torch.Tensor,
+    L: int = DEFAULT_L,
+) -> torch.Tensor:
+    """Build the oracle effective map from a ground-truth convolution kernel.
+
+    The effective map of a 1D 'same'-padding convolution with zero-padding is a
+    Toeplitz matrix ``M`` [L, L] where ``M[i, j] = k[i - j + r]`` (when the index
+    is in range, else 0), and ``b_eff = 0`` (the convolution has no bias).
+
+    Args:
+        kernel: ``[K]`` ground-truth FIR filter (K = 2*radius + 1, odd).
+        L: Input/output length (default 32).
+
+    Returns:
+        ``[L*L + L]`` effective map vector (1056-dim): ``M_flat ++ b_eff``.
+    """
+    k = kernel.reshape(-1).to(torch.float32)
+    K = k.shape[0]
+    if K % 2 == 0:
+        raise ValueError(f"kernel size K must be odd, got {K}")
+    r = K // 2
+    M = torch.zeros(L, L, dtype=torch.float32)
+    for i in range(L):
+        for j in range(L):
+            d = i - j  # diagonal offset
+            idx = d + r  # index into kernel
+            if 0 <= idx < K:
+                M[i, j] = k[idx]
+    b_eff = torch.zeros(L, dtype=torch.float32)
+    return torch.cat([M.reshape(-1), b_eff], dim=0)
+
+
+def effective_map_to_matrix(
+    eff_map: torch.Tensor,
+    L: int = DEFAULT_L,
+) -> torch.Tensor:
+    """Extract the L×L effective matrix M from a 1056-dim effective map.
+
+    Args:
+        eff_map: ``[D_eff]`` or ``[..., D_eff]`` effective map.
+        L: Matrix dimension (default 32).
+
+    Returns:
+        ``[L, L]`` (or ``[..., L, L]``) matrix M.
+    """
+    e = eff_map.reshape(*eff_map.shape[:-1], L * L + L)
+    M_flat = e[..., :L * L]
+    return M_flat.reshape(*e.shape[:-1], L, L)
 from src.training.train_mlp import TrainConfig, train_mlp_to_convergence
 
 

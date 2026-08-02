@@ -194,7 +194,9 @@ def _write_metadata(
             "L": codec.L,
             "H": codec.H,
             "n_params": codec.D,
-            "activation": "none (linear MLP)",
+            # NOTE: the activation is read from the actual MLPModel.forward; with
+            # the ReLU added to MLPModel this corpus is a ReLU-MLP corpus.
+            "activation": "relu (fc2(relu(fc1(x))))",
         },
         "collection": {
             "n_datasets": n_datasets,

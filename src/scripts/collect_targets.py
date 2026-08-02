@@ -42,6 +42,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Number of datasets to generate and process (default 2000).")
     p.add_argument("--n-mlp", type=int, default=8,
                    help="Number of MLPs (random inits) per dataset (default 8).")
+    p.add_argument("--mlp-hidden", type=int, default=128,
+                   help="MLP hidden dimension H (default 128).")
     p.add_argument("--n-train", type=int, default=1024,
                    help="Training samples per dataset (default 1024).")
     p.add_argument("--n-test", type=int, default=512,
@@ -117,7 +119,7 @@ def main(argv=None) -> int:
         patience=args.patience,
         val_frac=args.val_frac,
         L=32,
-        H=128,
+        H=args.mlp_hidden,
         device=device,
     )
     collect_cfg = CollectConfig(
@@ -130,7 +132,7 @@ def main(argv=None) -> int:
         corpus_seed=args.corpus_seed,
         mlp_seed_base=args.mlp_seed_base,
         L=32,
-        H=128,
+        H=args.mlp_hidden,
         out_dir=args.out_dir,
         gpus=gpu_ids if len(gpu_ids) > 1 else None,
         train=train_cfg,
