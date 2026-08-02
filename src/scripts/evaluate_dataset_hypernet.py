@@ -32,7 +32,6 @@ def evaluate(args):
     bundle = load_relu_corpus(corpus_dir=args.corpus_dir)
     print(f"[eval_dh] {bundle.n_configs} datasets, D={D}")
 
-    # Precompute datasets for encoder inputs
     cache = {}
     family = DatasetFamily(n_test=512, L=32)
     for i in range(bundle.n_configs):
@@ -49,7 +48,6 @@ def evaluate(args):
         theta_in = bundle.weights[did].to(device)
         n_mlp = theta_in.shape[0]
 
-        # Use first K_enc training points for encoder.
         x_enc = cache[did][0][:cfg.K_enc].unsqueeze(0)
         y_enc = cache[did][1][:cfg.K_enc].unsqueeze(0)
 

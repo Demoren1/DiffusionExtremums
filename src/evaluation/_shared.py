@@ -1,14 +1,4 @@
-"""Shared helpers for the evaluation modules.
-
-Small, dependency-light utilities used by :mod:`src.evaluation.evaluate`,
-:mod:`src.evaluation.regressor_eval`, and
-:mod:`src.evaluation.oracle_regressor_eval` so that the three modules do not
-each re-implement the same MSE / config-conversion / split-sampling /
-aggregation / summary-CSV boilerplate.
-
-These helpers are internal to the package and are not part of the public
-evaluation API.
-"""
+"""Shared helpers for the evaluation modules."""
 import csv
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,12 +9,10 @@ from src.configs.base import DatasetConfig
 
 
 def mse(pred: torch.Tensor, target: torch.Tensor) -> float:
-    """Mean squared error between two tensors (scalar float)."""
     return float(torch.nn.functional.mse_loss(pred, target).item())
 
 
 def config_dict_to_datasetconfig(cfg: Dict) -> DatasetConfig:
-    """Convert a config dict (from ``configs.json``) to a ``DatasetConfig``."""
     return DatasetConfig(
         family=str(cfg["family"]),
         kernel=tuple(float(v) for v in cfg["kernel"]),
@@ -44,15 +32,7 @@ def sample_eval_config_indices(
     n_eval_val: int,
     seed: int,
 ) -> List[Tuple[int, str]]:
-    """Sample the ``(config_idx, split)`` pairs to evaluate, deterministically.
-
-    Reproduces the exact sampling order used across the eval modules: one NumPy
-    ``Generator`` seeded from ``seed`` first samples the train configs, then the
-    val configs (both without replacement).
-
-    Returns:
-        List of ``(idx, split)`` tuples, train configs first then val configs.
-    """
+    """Sample (config_idx, split) pairs to evaluate, train configs first."""
     rng = np.random.default_rng(seed)
     train_sample = list(rng.choice(
         train_config_indices,
@@ -68,26 +48,7 @@ def sample_eval_config_indices(
 
 def collect_eval_lists(results, toeplitz_sources: List[str],
                        functional_methods: List[str]) -> Dict[str, Any]:
-    """Collect per-config metric values into per-split lists.
-
-    Shared by the regressor aggregation functions: walks the per-config eval
-    records and buckets ``norm_mse`` / ``raw_mse`` / ``toeplitz`` /
-    ``kernel_recovery`` / ``functional`` values by split (and by source/method
-    where applicable).
-
-    Args:
-        results: Sequence of per-config eval records, each exposing ``split``,
-            ``norm_mse``, ``raw_mse``, ``toeplitz``, ``kernel_recovery``, and
-            ``functional`` attributes.
-        toeplitz_sources: Ordered list of Toeplitz-ness sources.
-        functional_methods: Ordered list of functional-MSE method keys.
-
-    Returns:
-        Dict with keys ``norm_mse``/``raw_mse`` (split -> values),
-        ``toeplitz`` (source -> split -> values), ``kernel_rec``
-        (split -> metric -> values), and ``functional``
-        (method -> split -> values).
-    """
+    """Bucket per-config metric values into per-split lists."""
     splits = ["train", "val"]
     norm_mse = {s: [] for s in splits}
     raw_mse = {s: [] for s in splits}
@@ -114,18 +75,7 @@ def collect_eval_lists(results, toeplitz_sources: List[str],
 
 
 def stats_of(values: List[Optional[float]]) -> Dict[str, Any]:
-    """Summary statistics ``{mean, std, n}`` over a list of values.
-
-    ``None`` entries are skipped (functional-MSE values may be absent). An
-    empty (or all-None) list yields ``{"mean": None, "std": None, "n": 0}``.
-
-    Args:
-        values: List of scalar values or ``None``.
-
-    Returns:
-        Dict with ``mean``/``std`` as floats (or ``None`` when empty) and ``n``
-        as the count of non-None entries.
-    """
+    """Summary {mean, std, n} over values, skipping None entries."""
     vals = [v for v in values if v is not None]
     if not vals:
         return {"mean": None, "std": None, "n": 0}
@@ -135,18 +85,7 @@ def stats_of(values: List[Optional[float]]) -> Dict[str, Any]:
 
 def write_summary_csv(summary: Dict, path: str,
                       extra_rows: Optional[List[List]] = None) -> None:
-    """Write the standard ``summary.csv`` layout shared by the eval modules.
-
-    Writes the ``norm_mse`` / ``raw_mse`` / ``toeplitzness`` /
-    ``kernel_recovery`` / ``functional_mse`` sections (train/val splits
-    interleaved, matching the original per-module writers), followed by any
-    ``extra_rows`` (e.g. the oracle ``ratio_to_oracle_conv`` rows).
-
-    Args:
-        summary: Aggregated summary dict (see ``aggregate_regressor_results``).
-        path: Output ``.csv`` path.
-        extra_rows: Optional additional rows appended after the standard ones.
-    """
+    """Write the standard summary.csv layout shared by the eval modules."""
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["section", "name", "split", "mean", "std", "n"])

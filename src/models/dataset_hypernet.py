@@ -1,13 +1,4 @@
-"""Dataset-conditioned hypernetwork: few examples → weight vector.
-
-DatasetEncoder: takes K example (x, y) pairs, passes through a small transformer
-(1-2 self-attention layers) to extract the convolution signature, then pools to
-an embedding.
-
-WeightDecoder: embedding → MLP → flat weight vector θ [D].
-
-Training: encoder sees K enc pairs, loss on different L loss pairs.
-"""
+"""Dataset-conditioned hypernetwork: few examples → weight vector."""
 from typing import Tuple
 
 import torch
@@ -19,16 +10,7 @@ from src.models.weight_codec import WeightCodec
 
 
 class DatasetEncoder(nn.Module):
-    """Extract dataset signature from a few (x, y) example pairs.
-
-    Args:
-        L: Input/output dimension (32).
-        K_enc: Number of example pairs for the encoder (default 32).
-        d_model: Transformer width (default 128).
-        d_emb: Output embedding dimension (default 128).
-        n_layers: Transformer layers (default 1).
-        n_heads: Attention heads (default 4).
-    """
+    """Extract dataset signature from a few (x, y) example pairs."""
 
     def __init__(
         self, L: int = 32, K_enc: int = 32,
@@ -39,10 +21,8 @@ class DatasetEncoder(nn.Module):
         self.K_enc = int(K_enc)
         self.d_model = int(d_model)
 
-        # Project (x, y) concatenated → d_model.
         self.input_proj = nn.Linear(2 * L, d_model)
 
-        # Transformer layers (pre-LN, self-attention over K examples).
         self.layers = nn.ModuleList()
         for _ in range(n_layers):
             self.layers.append(nn.ModuleDict({
@@ -60,25 +40,13 @@ class DatasetEncoder(nn.Module):
         self.out_proj = nn.Linear(d_model, d_emb)
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Encode K example pairs to dataset embedding.
-
-        Args:
-            x: [B, K_enc, L] input examples.
-            y: [B, K_enc, L] target examples.
-
-        Returns:
-            emb: [B, d_emb].
-        """
-        # Concat (x, y) per example.
         tokens = torch.cat([x, y], dim=-1)               # [B, K, 2L]
         tokens = self.input_proj(tokens)                  # [B, K, d_model]
 
         for layer in self.layers:
-            # Pre-LN self-attention
             normed = layer["ln1"](tokens)
             attn_out, _ = layer["attn"](normed, normed, normed, need_weights=False)
             tokens = tokens + attn_out
-            # Pre-LN FFN
             normed = layer["ln2"](tokens)
             tokens = tokens + layer["ffn"](normed)
 
@@ -88,13 +56,7 @@ class DatasetEncoder(nn.Module):
 
 
 class WeightDecoder(nn.Module):
-    """Embedding → MLP weights.
-
-    Args:
-        d_emb: Input embedding dimension.
-        D: Output weight vector dimension (from WeightCodec).
-        hidden: Hidden layer widths (default [256, 512]).
-    """
+    """Embedding → MLP weights."""
 
     def __init__(self, d_emb: int = 128, D: int = 1072,
                  hidden: Tuple[int, ...] = (256, 512)):
@@ -109,30 +71,15 @@ class WeightDecoder(nn.Module):
         layers.append(nn.Linear(in_dim, D))
         self.net = nn.Sequential(*layers)
 
-        # Zero-init last layer so initial output is near-zero.
         nn.init.normal_(self.net[-1].weight, std=1e-4)
         nn.init.zeros_(self.net[-1].bias)
 
     def forward(self, emb: torch.Tensor) -> torch.Tensor:
-        """Map embedding to flat weight vector.
-
-        Args:
-            emb: [B, d_emb].
-
-        Returns:
-            theta: [B, D].
-        """
         return self.net(emb)
 
 
 class DatasetHypernet(nn.Module):
-    """Full pipeline: examples → embedding → weights.
-
-    Args:
-        encoder: DatasetEncoder instance.
-        decoder: WeightDecoder instance.
-        mlp_hidden: MLP hidden dimension H (for functional_forward).
-    """
+    """Full pipeline: examples → embedding → weights."""
 
     def __init__(self, encoder: DatasetEncoder, decoder: WeightDecoder,
                  mlp_hidden: int = 16):
@@ -142,15 +89,6 @@ class DatasetHypernet(nn.Module):
         self.mlp_hidden = int(mlp_hidden)
 
     def forward(self, x_enc: torch.Tensor, y_enc: torch.Tensor) -> torch.Tensor:
-        """Encode examples, decode to weights.
-
-        Args:
-            x_enc: [B, K_enc, L].
-            y_enc: [B, K_enc, L].
-
-        Returns:
-            theta: [B, D].
-        """
         emb = self.encoder(x_enc, y_enc)
         return self.decoder(emb)
 
@@ -158,15 +96,6 @@ class DatasetHypernet(nn.Module):
         self, x_enc: torch.Tensor, y_enc: torch.Tensor,
         x_loss: torch.Tensor, y_loss: torch.Tensor,
     ) -> torch.Tensor:
-        """Full forward + functional MSE loss.
-
-        Args:
-            x_enc, y_enc: [B, K_enc, L] examples for the encoder.
-            x_loss, y_loss: [B, N_loss, L] points for the loss.
-
-        Returns:
-            Scalar MSE loss.
-        """
         theta = self.forward(x_enc, y_enc)
         y_pred = functional_forward(
             theta, x_loss, L=32, H=self.mlp_hidden)

@@ -1,28 +1,4 @@
-"""Smoke test for the multi-GPU parallel target collection (Phase 2+).
-
-Verifies that the multi-GPU parallelization (``torch.multiprocessing.spawn``,
-one process per GPU, corpus sharding + merge) produces output that is:
-
-(a) **Format-correct**: the merged files (``weights.pt``, ``losses.pt``,
-    ``configs.json``, ``dataset_ids.json``, ``metadata.json``) have exactly the
-    Phase 2 shapes and contents (``weights [n_datasets, n_mlp, D]`` with
-    ``D = 8352``, ``losses [n_datasets, n_mlp, 3]``, etc.).
-(b) **Equivalent to the sequential path**: running the same config sequentially
-    on one GPU and in parallel across multiple GPUs gives (near-)identical
-    weights and losses. This holds because the corpus is generated
-    deterministically from ``corpus_seed`` and ``mlp_seed_base`` depends only on
-    the global dataset index, so sharding does not change any per-dataset result.
-(c) **Resumable**: an interrupted parallel run (simulated by a partial shard
-    checkpoint) resumes and completes correctly.
-(d) **Clean**: no leftover shard / checkpoint files after a successful merge.
-
-If fewer than 2 CUDA GPUs are available, the multi-GPU comparison is skipped
-(the single-GPU sequential path is still exercised as a regression check).
-
-Run with::
-
-    python -m src.smoke.test_collect_parallel
-"""
+"""Smoke test for the multi-GPU parallel target collection (Phase 2+)."""
 import json
 import os
 import shutil
@@ -45,7 +21,6 @@ from src.training.train_mlp import TrainConfig
 
 def _make_config(out_dir: str, n_datasets: int = 4, n_mlp: int = 2,
                  gpus=None) -> CollectConfig:
-    """Build a small, fast CollectConfig for testing."""
     return CollectConfig(
         n_datasets=n_datasets,
         n_mlp=n_mlp,
@@ -63,7 +38,6 @@ def _make_config(out_dir: str, n_datasets: int = 4, n_mlp: int = 2,
 
 
 def _check_output_format(out_dir: str, n_datasets: int, n_mlp: int) -> None:
-    """Assert the output directory has the correct Phase 2 format."""
     codec = WeightCodec(L=32, H=128)
     for fn in ("weights.pt", "losses.pt", "configs.json",
                "dataset_ids.json", "metadata.json"):
@@ -92,11 +66,9 @@ def _check_output_format(out_dir: str, n_datasets: int, n_mlp: int) -> None:
     assert meta["collection"]["n_datasets"] == n_datasets
     assert meta["collection"]["n_mlp"] == n_mlp
 
-    # Weights must be finite (no NaN/Inf from a corrupt merge).
     assert torch.isfinite(weights).all(), "weights contain non-finite entries"
     assert torch.isfinite(losses).all(), "losses contain non-finite entries"
 
-    # Round-trip a weight vector through the codec.
     theta = weights[0, 0]
     model = codec.instantiate(theta)
     x = torch.randn(8, 32)
@@ -110,7 +82,6 @@ def _check_output_format(out_dir: str, n_datasets: int, n_mlp: int) -> None:
 
 
 def _check_no_leftovers(out_dir: str, n_shards: int) -> None:
-    """Assert no shard / checkpoint files remain after a successful merge."""
     for r in range(n_shards):
         for fn in (f"_shard_{r}.pt", f"_progress_shard_{r}.pt"):
             p = os.path.join(out_dir, fn)
@@ -120,7 +91,6 @@ def _check_no_leftovers(out_dir: str, n_shards: int) -> None:
 
 
 def test_shard_indices() -> None:
-    """Unit test: ``_shard_indices`` partitions range(n) with no gaps/overlaps."""
     print("\n=== Unit test: _shard_indices ===")
     for n, k in [(0, 4), (1, 4), (4, 4), (7, 3), (10, 4), (100, 8)]:
         shards = _shard_indices(n, k)
@@ -128,9 +98,7 @@ def test_shard_indices() -> None:
         union = sorted(i for s in shards for i in s)
         assert union == list(range(n)), \
             f"shards for n={n},k={k} do not cover range({n}): {union}"
-        # No overlaps.
         assert len(union) == len(set(union)), f"overlaps for n={n}, k={k}"
-        # Contiguous.
         for s in shards:
             assert s == list(range(s[0], s[0] + len(s))) if s else True, \
                 f"shard not contiguous: {s}"
@@ -139,7 +107,6 @@ def test_shard_indices() -> None:
 
 
 def test_resolve_gpus() -> None:
-    """Unit test: ``resolve_gpus`` parses 'auto' and comma lists correctly."""
     print("\n=== Unit test: resolve_gpus ===")
     auto = resolve_gpus("auto")
     if torch.cuda.is_available():
@@ -164,11 +131,9 @@ def test_resolve_gpus() -> None:
 
 
 def test_sequential_regression() -> str:
-    """Run the sequential single-GPU path and check the output format."""
     print("\n=== Sequential single-GPU regression test ===")
     out_dir = tempfile.mkdtemp(prefix="targets_seq_")
     cfg = _make_config(out_dir, n_datasets=4, n_mlp=2, gpus=None)
-    # Force CPU if no CUDA, else cuda:0.
     if not torch.cuda.is_available():
         cfg = CollectConfig(
             n_datasets=4, n_mlp=2, n_train=256, n_test=128, noise_std=0.1,
@@ -183,7 +148,6 @@ def test_sequential_regression() -> str:
 
 
 def test_parallel_multi_gpu(gpu_ids: list) -> str:
-    """Run the multi-GPU parallel path and check the merged output."""
     n_datasets = 4
     n_mlp = 2
     n_shards = len(gpu_ids)
@@ -199,21 +163,12 @@ def test_parallel_multi_gpu(gpu_ids: list) -> str:
 
 
 def test_parallel_vs_sequential(gpu_ids: list) -> None:
-    """Compare parallel and sequential outputs for the same config.
-
-    Because the corpus is deterministic and ``mlp_seed_base`` depends only on
-    the global dataset index, the parallel and sequential paths should produce
-    (near-)identical weights and losses. We use ``allclose`` with a loose
-    tolerance to tolerate minor GPU floating-point differences.
-    """
     print(f"\n=== Parallel vs sequential equivalence ({len(gpu_ids)} GPUs) ===")
     n_datasets = 4
     n_mlp = 2
 
-    # Sequential run on gpu_ids[0].
     seq_dir = tempfile.mkdtemp(prefix="targets_seq_eq_")
     seq_cfg = _make_config(seq_dir, n_datasets=n_datasets, n_mlp=n_mlp, gpus=None)
-    # Pin the sequential run to the same first GPU for a fair comparison.
     seq_cfg = CollectConfig(
         n_datasets=n_datasets, n_mlp=n_mlp, n_train=256, n_test=128,
         noise_std=0.1, corpus_seed=7, L=32, H=128, out_dir=seq_dir, gpus=None,
@@ -222,7 +177,6 @@ def test_parallel_vs_sequential(gpu_ids: list) -> None:
     )
     collect_targets(seq_cfg, show_progress=False)
 
-    # Parallel run across gpu_ids.
     par_dir = tempfile.mkdtemp(prefix="targets_par_eq_")
     par_cfg = _make_config(par_dir, n_datasets=n_datasets, n_mlp=n_mlp,
                            gpus=gpu_ids)
@@ -238,7 +192,6 @@ def test_parallel_vs_sequential(gpu_ids: list) -> None:
     assert seq_l.shape == par_l.shape, \
         f"shape mismatch: seq {seq_l.shape} vs par {par_l.shape}"
 
-    # Weights should match closely (same seeds -> same inits -> same convergence).
     w_close = torch.allclose(seq_w, par_w, atol=1e-4, rtol=1e-3)
     l_close = torch.allclose(seq_l, par_l, atol=1e-4, rtol=1e-3)
     max_w_diff = (seq_w - par_w).abs().max().item()
@@ -250,7 +203,6 @@ def test_parallel_vs_sequential(gpu_ids: list) -> None:
     assert w_close, f"weights differ: max abs diff {max_w_diff:.2e}"
     assert l_close, f"losses differ: max abs diff {max_l_diff:.2e}"
 
-    # configs.json and dataset_ids.json must be identical (deterministic corpus).
     with open(os.path.join(seq_dir, "configs.json")) as f:
         seq_configs = json.load(f)
     with open(os.path.join(par_dir, "configs.json")) as f:
@@ -268,15 +220,12 @@ def test_parallel_vs_sequential(gpu_ids: list) -> None:
 
 
 def test_parallel_resumability(gpu_ids: list) -> None:
-    """Simulate an interrupted parallel run and verify it resumes + completes."""
     n_datasets = 4
     n_mlp = 2
     n_shards = len(gpu_ids)
     print(f"\n=== Parallel resumability test ({n_shards} GPUs) ===")
     out_dir = tempfile.mkdtemp(prefix="targets_resume_")
 
-    # Write a fake partial shard checkpoint for shard 0: only dataset index 0
-    # done. Shard 0 owns the first ceil(n_datasets/n_shards) indices.
     shards = _shard_indices(n_datasets, n_shards)
     shard0_indices = shards[0]
     codec = WeightCodec(L=32, H=128)
@@ -295,8 +244,6 @@ def test_parallel_resumability(gpu_ids: list) -> None:
     _check_output_format(out_dir, n_datasets, n_mlp)
     _check_no_leftovers(out_dir, n_shards)
 
-    # The resumed dataset (index shard0_indices[0]) should match the fake
-    # checkpoint's weights (it was skipped, not retrained).
     weights = torch.load(os.path.join(out_dir, "weights.pt"))
     assert torch.allclose(weights[shard0_indices[0]], fake_w[0]), \
         "resumed dataset weights do not match the checkpoint (should be skipped)"
@@ -305,12 +252,10 @@ def test_parallel_resumability(gpu_ids: list) -> None:
 
 
 def test_merge_shards_validation() -> None:
-    """Unit test: ``_merge_shards`` detects missing/overlapping/incomplete shards."""
     print("\n=== Unit test: _merge_shards validation ===")
     tmp = tempfile.mkdtemp(prefix="merge_test_")
     n_datasets, n_mlp, D = 4, 2, 8352
     try:
-        # Missing shard file.
         try:
             _merge_shards(tmp, 2, n_datasets, n_mlp, D)
             assert False, "should have raised (missing shard)"
@@ -318,7 +263,6 @@ def test_merge_shards_validation() -> None:
             assert "missing shard" in str(e), str(e)
             print("  missing shard detected  OK")
 
-        # Overlapping shards.
         torch.save({"indices": torch.tensor([0, 1], dtype=torch.long),
                     "weights": torch.zeros(2, n_mlp, D),
                     "losses": torch.zeros(2, n_mlp, 3)},
@@ -334,7 +278,6 @@ def test_merge_shards_validation() -> None:
             assert "overlap" in str(e), str(e)
             print("  overlapping shards detected  OK")
 
-        # Complete coverage: shards 0=[0,1] and 1=[2,3] cover all 4.
         os.remove(os.path.join(tmp, "_shard_1.pt"))
         torch.save({"indices": torch.tensor([2, 3], dtype=torch.long),
                     "weights": torch.zeros(2, n_mlp, D),
@@ -345,8 +288,6 @@ def test_merge_shards_validation() -> None:
         assert l.shape == (n_datasets, n_mlp, 3)
         print("  complete coverage merges  OK")
 
-        # Incomplete coverage: both shard files present, but index 3 is left
-        # uncovered (shard 1 covers only [2]).
         os.remove(os.path.join(tmp, "_shard_1.pt"))
         torch.save({"indices": torch.tensor([2], dtype=torch.long),
                     "weights": torch.zeros(1, n_mlp, D),
@@ -363,7 +304,6 @@ def test_merge_shards_validation() -> None:
 
 
 def main() -> int:
-    """Run all parallel-collection smoke tests and assert the validation gates."""
     print("=" * 90)
     print("Multi-GPU parallel collection smoke test (Phase 2+)")
     print("=" * 90)
@@ -375,7 +315,6 @@ def main() -> int:
 
     all_ok = True
 
-    # 1. Unit tests (always run).
     try:
         test_shard_indices()
         test_resolve_gpus()
@@ -385,7 +324,6 @@ def main() -> int:
         print(f"  unit tests FAIL: {e}")
         all_ok = False
 
-    # 2. Sequential regression (always run; CPU fallback if no CUDA).
     try:
         seq_dir = test_sequential_regression()
         print("  sequential regression PASS")
@@ -394,10 +332,8 @@ def main() -> int:
         print(f"  sequential regression FAIL: {e}")
         all_ok = False
 
-    # 3. Multi-GPU tests (require >= 2 CUDA GPUs).
     gpu_ids = resolve_gpus("auto")
     if torch.cuda.is_available() and len(gpu_ids) >= 2:
-        # Use the first 2 GPUs for the test (keeps it fast and focused).
         test_gpus = gpu_ids[:2]
         try:
             par_dir = test_parallel_multi_gpu(test_gpus)

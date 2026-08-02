@@ -1,27 +1,4 @@
-"""CLI: collect converged MLP weights as regression targets (Phase 2, Approach B).
-
-Generates a corpus of datasets, trains ``n_mlp`` MLPs (different random inits)
-per dataset to convergence, and saves the flattened converged weight vectors
-plus dataset configs and metadata to ``--out-dir``.
-
-Multi-GPU: pass ``--gpus`` (comma-separated GPU ids, or ``auto`` for all visible
-GPUs). With >1 GPU the corpus is sharded across GPUs (one process per GPU via
-``torch.multiprocessing.spawn``) and the shards are merged into the standard
-output format. With 0/1 GPU the original sequential single-device path is used.
-
-Examples:
-    # Small smoke run (10 datasets x 4 MLPs, single GPU)
-    python -m src.scripts.collect_targets --n-datasets 10 --n-mlp 4 --out-dir data/processed/targets_smoke
-
-    # Full corpus (2000 datasets x 8 MLPs, n_train=1024) on all visible GPUs
-    python -m src.scripts.collect_targets --n-datasets 2000 --n-mlp 8 --gpus auto --out-dir data/processed/targets
-
-    # Use a specific subset of GPUs (e.g. 4 of 8 A100s)
-    python -m src.scripts.collect_targets --n-datasets 2000 --n-mlp 8 --gpus 0,1,2,3 --out-dir data/processed/targets
-
-Run with the conda env activated:
-    source ~/miniconda3/etc/profile.d/conda.sh && conda activate myenv
-"""
+"""CLI: collect converged MLP weights as regression targets."""
 import argparse
 import os
 import sys
@@ -33,11 +10,8 @@ from src.training.train_mlp import TrainConfig
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    """Parse CLI arguments."""
     p = argparse.ArgumentParser(
-        description="Collect converged MLP weights as regression targets "
-                    "(Phase 2, Approach B).")
-    # Corpus
+        description="Collect converged MLP weights as regression targets.")
     p.add_argument("--n-datasets", type=int, default=2000,
                    help="Number of datasets to generate and process (default 2000).")
     p.add_argument("--n-mlp", type=int, default=8,
@@ -57,7 +31,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--families", type=str, default=None,
                    help="Comma-separated family subset, e.g. 'MA,GAUSS' "
                         "(default: all 5).")
-    # Training
     p.add_argument("--lr", type=float, default=3e-3, help="AdamW peak LR.")
     p.add_argument("--steps", type=int, default=5000,
                    help="Max training steps per MLP (default 5000).")
@@ -70,33 +43,22 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--weight-decay", type=float, default=0.0,
                    help="AdamW weight decay (default 0.0).")
     p.add_argument("--device", type=str, default="auto",
-                   help="torch device: 'auto', 'cuda', 'cpu' (default auto). "
-                        "Used only in the single-GPU sequential path; in the "
-                        "multi-GPU path each worker is pinned to its GPU.")
-    # Multi-GPU
+                   help="torch device: 'auto', 'cuda', 'cpu' (default auto).")
     p.add_argument("--gpus", type=str, default="auto",
-                   help="Comma-separated GPU ids to use for multi-GPU parallel "
-                        "collection (e.g. '0,1,2,3'), or 'auto' to use all visible "
-                        "GPUs (default auto). With >1 GPU the corpus is sharded "
-                        "across GPUs (one process per GPU) and shards are merged. "
-                        "With 0/1 GPU the sequential single-device path is used.")
-    # Output
+                   help="Comma-separated GPU ids or 'auto' for all visible GPUs "
+                        "(default auto).")
     p.add_argument("--out-dir", type=str, default="data/processed/targets",
                    help="Output directory (default data/processed/targets).")
     return p.parse_args(argv)
 
 
 def main(argv=None) -> int:
-    """Run the target-collection pipeline."""
     args = parse_args(argv)
 
     families = None
     if args.families is not None:
         families = tuple(s.strip() for s in args.families.split(",") if s.strip())
 
-    # Resolve the GPU list. With >1 GPU the parallel path is used (each worker
-    # pins itself to its GPU and overrides the device to "cuda"); with 0/1 GPU
-    # the sequential path uses --device (default "auto").
     gpu_ids = resolve_gpus(args.gpus)
     if len(gpu_ids) > 1:
         device = "cuda"
@@ -104,7 +66,6 @@ def main(argv=None) -> int:
     else:
         device = args.device
         if len(gpu_ids) == 1:
-            # Pin the single GPU via CUDA_VISIBLE_DEVICES for consistency.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_ids[0])
             device = "cuda" if torch.cuda.is_available() else args.device
             print(f"[collect_targets] single-GPU: gpu {gpu_ids[0]}")

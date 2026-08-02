@@ -1,30 +1,4 @@
-"""Smoke test for Phase 2: MLP target collection (Approach B).
-
-Verifies that the converged MLP weights collected by the Phase 2 pipeline are
-good regression targets. Specifically, on a small subset of datasets it checks:
-
-(a) **Convergence**: MLPs reach low train MSE (the optimization actually
-    converges, not stuck at a high loss).
-(b) **Generalization**: with n_train=1024 >> L=32, the converged MLPs generalize
-    well — test MSE is close to the convolution/oracle baseline. This validates
-    that the targets are *good solutions* (unlike the small-n_train Phase 1 case
-    where the MLP overfits). The conv baseline (learned kernel) and the oracle
-    conv (true kernel) bound the achievable test MSE.
-(c) **Weight diversity**: different random initializations converge to
-    *different* weight vectors (pairwise L2 distance / per-dim variance well
-    above zero). This is the gauge freedom of the (W1, W2) factorization and is
-    what gives the target collection a rich weight distribution.
-(d) **Well-behaved weights**: the weight vectors are finite and have a
-    reasonable scale (norm).
-
-It also exercises the full collection pipeline end-to-end on a tiny corpus and
-confirms the saved files (weights.pt, losses.pt, configs.json, metadata.json)
-load back correctly and round-trip through the ``WeightCodec``.
-
-Run with::
-
-    python -m src.smoke.test_mlp_targets
-"""
+"""Smoke test for Phase 2: MLP target collection (Approach B)."""
 import json
 import os
 import shutil
@@ -51,13 +25,8 @@ from src.utils.seeding import set_seed
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# ---------------------------------------------------------------------------
-# Helpers (mirror the Phase 1 smoke test's dataset/conv helpers)
-# ---------------------------------------------------------------------------
-
 def make_config(family: str, radius: int, noise_std: float, n_train: int,
                 seed: int, L: int = 32, n_test: int = 512):
-    """Sample a kernel for ``family`` and build a deterministic DatasetConfig."""
     from src.configs.base import DatasetConfig
     rng = np.random.default_rng(seed)
     kernel = sample_kernel(family, radius, rng)
@@ -75,7 +44,6 @@ def make_config(family: str, radius: int, noise_std: float, n_train: int,
 
 def oracle_test_mse(x_test_np: np.ndarray, y_test_np: np.ndarray,
                     kernel_np: np.ndarray) -> float:
-    """Test MSE of the *true* kernel (oracle conv). With noise_std=0 this is ~0."""
     from src.data.dataset import conv1d_same
     y_pred = conv1d_same(x_test_np, kernel_np)
     return float(np.mean((y_pred - y_test_np) ** 2))
@@ -83,7 +51,6 @@ def oracle_test_mse(x_test_np: np.ndarray, y_test_np: np.ndarray,
 
 def train_conv_baseline(x_train, y_train, x_test, y_test, K, steps=2000,
                        lr=3e-3) -> Tuple[float, float]:
-    """Train a 1D conv baseline (learned kernel) and return (train_mse, test_mse)."""
     conv = Conv1dModel(L=32, kernel_size=K, bias=False).to(DEVICE)
     opt = torch.optim.AdamW(conv.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
@@ -105,10 +72,6 @@ def train_conv_baseline(x_train, y_train, x_test, y_test, K, steps=2000,
     return tr, te
 
 
-# ---------------------------------------------------------------------------
-# Per-dataset result record
-# ---------------------------------------------------------------------------
-
 @dataclass
 class TargetResult:
     family: str
@@ -129,10 +92,6 @@ class TargetResult:
     n_steps_mean: float
 
 
-# ---------------------------------------------------------------------------
-# Core smoke test: train N MLPs per dataset, collect weights, check properties
-# ---------------------------------------------------------------------------
-
 def run_target_smoke(
     families: Tuple[str, ...] = ("MA", "DIFF", "GAUSS", "MATCH", "RAND"),
     radii: Tuple[int, ...] = (2,),
@@ -144,10 +103,6 @@ def run_target_smoke(
     L: int = 32,
     n_test: int = 512,
 ) -> List[TargetResult]:
-    """Train n_mlp MLPs per dataset, collect weights, and record metrics.
-
-    Returns a list of ``TargetResult`` (one per dataset).
-    """
     results: List[TargetResult] = []
     sampler = DatasetFamily(n_test=n_test, L=L)
     codec = WeightCodec(L=L, H=128)
@@ -160,7 +115,6 @@ def run_target_smoke(
                                   L=L, n_test=n_test)
                 inst = sampler.sample_dataset(cfg)
 
-                # Train n_mlp MLPs with different inits.
                 thetas = torch.zeros(n_mlp, codec.D, dtype=torch.float32)
                 train_ms, val_ms, test_ms, n_steps = [], [], [], []
                 for j in range(n_mlp):
@@ -177,20 +131,16 @@ def run_target_smoke(
                     test_ms.append(res.test_mse)
                     n_steps.append(res.n_steps)
 
-                # Conv baseline (learned kernel) + oracle (true kernel).
                 conv_tr, conv_te = train_conv_baseline(
                     inst.x_train, inst.y_train, inst.x_test, inst.y_test, K)
                 oracle = oracle_test_mse(
                     inst.x_test.numpy(), inst.y_test.numpy(), inst.kernel.numpy())
 
-                # Weight diversity metrics.
                 norms = thetas.norm(dim=1)
-                # Mean pairwise L2 distance over all init pairs.
                 if n_mlp >= 2:
                     diffs = torch.cdist(thetas, thetas, p=2)
                     n_pairs = n_mlp * (n_mlp - 1)
                     pairwise = diffs.sum().item() / n_pairs
-                    # Mean per-dim variance across inits (averaged over dims).
                     var = thetas.var(dim=0, unbiased=True).mean().item()
                 else:
                     pairwise = 0.0
@@ -214,7 +164,6 @@ def run_target_smoke(
 
 
 def print_table(results: List[TargetResult]) -> None:
-    """Print a per-dataset summary table."""
     header = (f"{'family':<6} {'r':>2} {'n_tr':>5} {'n_mlp':>5} "
               f"{'| mlp_train':>10} {'mlp_test':>10} {'conv_test':>10} "
               f"{'oracle':>10} {'| test/conv':>10} {'test/oracle':>11} "
@@ -232,7 +181,6 @@ def print_table(results: List[TargetResult]) -> None:
               f"{r.weight_var:>10.3e} {r.n_steps_mean:>7.0f}")
     print("-" * len(header))
 
-    # Aggregate summary.
     mean_mlp = np.mean([r.mlp_test for r in results])
     mean_conv = np.mean([r.conv_test for r in results])
     mean_oracle = np.mean([r.oracle_test for r in results])
@@ -247,15 +195,8 @@ def print_table(results: List[TargetResult]) -> None:
     print(f"  mean per-dim weight variance     : {mean_var:.3e}")
 
 
-# ---------------------------------------------------------------------------
-# End-to-end pipeline test: run collect_targets on a tiny corpus, load back
-# ---------------------------------------------------------------------------
-
 def test_pipeline_roundtrip() -> str:
-    """Run the full collection pipeline on a tiny corpus and verify the files.
-
-    Returns the temp output directory (kept for inspection; caller may remove).
-    """
+    """Run the full collection pipeline on a tiny corpus and verify the files."""
     print("\n=== End-to-end pipeline test (tiny corpus) ===")
     out_dir = tempfile.mkdtemp(prefix="mlp_targets_smoke_")
     cfg = CollectConfig(
@@ -271,13 +212,11 @@ def test_pipeline_roundtrip() -> str:
     )
     collect_targets(cfg, show_progress=True)
 
-    # Verify all expected files exist.
     for fn in ("weights.pt", "losses.pt", "configs.json",
                "dataset_ids.json", "metadata.json"):
         path = os.path.join(out_dir, fn)
         assert os.path.exists(path), f"missing output file: {fn}"
 
-    # Load and check shapes / round-trip.
     weights = torch.load(os.path.join(out_dir, "weights.pt"))
     losses = torch.load(os.path.join(out_dir, "losses.pt"))
     with open(os.path.join(out_dir, "configs.json")) as f:
@@ -292,7 +231,6 @@ def test_pipeline_roundtrip() -> str:
     assert meta["weight_vectorization"]["D"] == codec.D
     assert meta["mlp_architecture"]["n_params"] == codec.D
 
-    # Round-trip: instantiate a weight vector and check it produces finite output.
     theta = weights[0, 0]
     assert torch.isfinite(theta).all(), "weight vector has non-finite entries"
     model = codec.instantiate(theta)
@@ -302,7 +240,6 @@ def test_pipeline_roundtrip() -> str:
     assert torch.isfinite(y).all(), "instantiated MLP produced non-finite output"
     assert y.shape == (8, 32)
 
-    # Verify the flatten order is exactly the canonical order (pack == unpack).
     params = codec.unpack(theta)
     theta2 = codec.pack(params)
     assert torch.allclose(theta, theta2, atol=1e-6), "pack/unpack round-trip failed"
@@ -317,15 +254,8 @@ def test_pipeline_roundtrip() -> str:
     return out_dir
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 def main() -> int:
-    """Run the Phase 2 smoke test and assert the validation gates.
-
-    Returns 0 on success, 1 on failure.
-    """
+    """Run the Phase 2 smoke test and assert the validation gates."""
     set_seed(0)
     print("=" * 90)
     print("Phase 2 smoke test: MLP target collection (Approach B)")
@@ -334,31 +264,23 @@ def main() -> int:
     if DEVICE.type == "cuda":
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
 
-    # 1. Core smoke test: convergence, generalization, weight diversity.
     print("\n=== Convergence / generalization / weight diversity ===")
     results = run_target_smoke(
         families=FAMILIES, radii=(2,), n_train=1024, noise_std=0.1,
         seeds=(0, 1), n_mlp=4, steps=3000)
     print_table(results)
 
-    # 2. End-to-end pipeline test (tiny corpus, save + load back).
     out_dir = test_pipeline_roundtrip()
 
-    # 3. Assertions (validation gate).
     print("\n=== Assertions (validation gate) ===")
     all_ok = True
 
-    # (a) Convergence: low train MSE (well below the noise floor of 0.1^2=0.01
-    #     is not required, but train MSE should be small relative to test).
     max_train = max(r.mlp_train for r in results)
     ok_conv = max_train < 0.01  # train MSE < noise variance
     print(f"  (a) convergence: max train MSE = {max_train:.6f} < 0.01 "
           f"-> {'PASS' if ok_conv else 'FAIL'}")
     all_ok &= ok_conv
 
-    # (b) Generalization: MLP test MSE close to conv baseline. With n_train=1024
-    #     the MLP should generalize at least as well as the learned conv (the
-    #     system is over-determined). We require mean mlp_test <= 1.5 * mean conv.
     mean_mlp = float(np.mean([r.mlp_test for r in results]))
     mean_conv = float(np.mean([r.conv_test for r in results]))
     mean_oracle = float(np.mean([r.oracle_test for r in results]))
@@ -369,8 +291,6 @@ def main() -> int:
     print(f"      (reference: mean oracle_test = {mean_oracle:.6f})")
     all_ok &= ok_gen
 
-    # (c) Weight diversity: different inits give different weight vectors.
-    #     Require mean pairwise distance > 0 and per-dim variance > 0.
     mean_pair = float(np.mean([r.pairwise_dist for r in results]))
     mean_var = float(np.mean([r.weight_var for r in results]))
     ok_div = mean_pair > 1.0 and mean_var > 1e-8
@@ -379,7 +299,6 @@ def main() -> int:
           f"-> {'PASS' if ok_div else 'FAIL'}")
     all_ok &= ok_div
 
-    # (d) Well-behaved weights: finite, reasonable scale.
     all_finite = all(torch.isfinite(torch.tensor(r.weight_norm)).item()
                      for r in results)
     norms = [r.weight_norm for r in results]
@@ -390,7 +309,6 @@ def main() -> int:
           f"-> {'PASS' if (all_finite and ok_scale) else 'FAIL'}")
     all_ok &= all_finite and ok_scale
 
-    # Clean up the temp pipeline output (optional; keep for inspection).
     try:
         shutil.rmtree(out_dir)
     except OSError:

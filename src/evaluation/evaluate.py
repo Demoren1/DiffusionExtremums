@@ -1,41 +1,4 @@
-"""Evaluation: 3-method comparison + Toeplitz-ness + kernel recovery.
-
-For a set of test datasets (seen train configs + held-out val configs), this
-module evaluates three methods and computes Toeplitz-ness / kernel-recovery
-metrics.
-
-Methods
--------
-(a) **From-scratch MLP**: train an ``MLPModel`` on the dataset's train split
-    (``train_mlp_to_convergence``), evaluate on test.
-(b) **Learned convolution**: train a ``Conv1dModel`` on the train split,
-    evaluate on test.
-(c) **Oracle convolution**: use the ground-truth kernel directly, evaluate on
-    test.
-
-Metrics
--------
-- **Test MSE** for each method.
-- **Generalization gap** (train MSE vs test MSE).
-- **Relative-to-conv MSE**: (method MSE) / (learned conv MSE).
-- **Toeplitz-ness score**: for the effective matrix M [32×32], measure how close
-  M is to a Toeplitz matrix (constant diagonals). Score = mean over diagonals of
-  the std of that diagonal's entries (lower = more Toeplitz = more
-  convolution-like). Computed for the oracle M and the target M (collected
-  MLPs).
-- **Kernel recovery**: if M is approximately Toeplitz, extract the implied
-  kernel (average each diagonal) and compare to the ground-truth kernel (cosine
-  similarity, L2 distance).
-
-Protocol
---------
-- Evaluate on a sample of datasets: ``n_eval_train`` train configs +
-  ``n_eval_val`` val configs (held-out).
-- For each dataset, generate (x_train, y_train, x_test, y_test) via
-  ``generate_dataset()`` with the config from ``configs.json``.
-- Run all 3 methods, collect metrics, print a comparison table, save to
-  ``results/evaluation/``.
-"""
+"""Evaluation: 3-method comparison + Toeplitz-ness + kernel recovery."""
 import csv
 import json
 import os
@@ -56,8 +19,6 @@ from src.evaluation._shared import (
 )
 from src.smoke.models import Conv1dModel
 
-
-# Default MLP dimensions (must match src/models/mlp.py and weight_codec.py).
 DEFAULT_L: int = 32
 DEFAULT_H: int = 128
 
@@ -66,19 +27,7 @@ def kernel_to_effective_map(
     kernel: torch.Tensor,
     L: int = DEFAULT_L,
 ) -> torch.Tensor:
-    """Build the oracle effective map from a ground-truth convolution kernel.
-
-    The effective map of a 1D 'same'-padding convolution with zero-padding is a
-    Toeplitz matrix ``M`` [L, L] where ``M[i, j] = k[i - j + r]`` (when the index
-    is in range, else 0), and ``b_eff = 0`` (the convolution has no bias).
-
-    Args:
-        kernel: ``[K]`` ground-truth FIR filter (K = 2*radius + 1, odd).
-        L: Input/output length (default 32).
-
-    Returns:
-        ``[L*L + L]`` effective map vector (1056-dim): ``M_flat ++ b_eff``.
-    """
+    """Build the oracle Toeplitz effective map from a convolution kernel."""
     k = kernel.reshape(-1).to(torch.float32)
     K = k.shape[0]
     if K % 2 == 0:
@@ -87,8 +36,8 @@ def kernel_to_effective_map(
     M = torch.zeros(L, L, dtype=torch.float32)
     for i in range(L):
         for j in range(L):
-            d = i - j  # diagonal offset
-            idx = d + r  # index into kernel
+            d = i - j
+            idx = d + r
             if 0 <= idx < K:
                 M[i, j] = k[idx]
     b_eff = torch.zeros(L, dtype=torch.float32)
@@ -99,38 +48,15 @@ def effective_map_to_matrix(
     eff_map: torch.Tensor,
     L: int = DEFAULT_L,
 ) -> torch.Tensor:
-    """Extract the L×L effective matrix M from a 1056-dim effective map.
-
-    Args:
-        eff_map: ``[D_eff]`` or ``[..., D_eff]`` effective map.
-        L: Matrix dimension (default 32).
-
-    Returns:
-        ``[L, L]`` (or ``[..., L, L]``) matrix M.
-    """
+    """Extract the LxL effective matrix M from a 1056-dim effective map."""
     e = eff_map.reshape(*eff_map.shape[:-1], L * L + L)
     M_flat = e[..., :L * L]
     return M_flat.reshape(*e.shape[:-1], L, L)
 from src.training.train_mlp import TrainConfig, train_mlp_to_convergence
 
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
-
 @dataclass
 class MethodResult:
-    """Result of one method on one dataset.
-
-    Attributes:
-        method: Method name ("from_scratch_mlp", "learned_conv", "oracle_conv").
-        test_mse: Mean squared error on the test split.
-        train_mse: MSE on the train split (for the generalization gap).
-        n_samples: Number of samples (1 for the deterministic methods).
-        test_mse_std: Std of test MSE across samples (None for the
-            deterministic methods).
-        extra: Optional extra info.
-    """
     method: str
     test_mse: float
     train_mse: float
@@ -141,21 +67,6 @@ class MethodResult:
 
 @dataclass
 class DatasetEval:
-    """Full evaluation result for one dataset.
-
-    Attributes:
-        config_idx: Index into the configs.json list.
-        split: "train" or "val" (whether this config was in the training set or
-            held out).
-        family: Dataset family name.
-        radius: Kernel radius.
-        noise_std: Noise std.
-        methods: Dict method_name -> MethodResult.
-        toeplitzness: Dict source -> Toeplitz-ness score. Sources: "oracle",
-            "target".
-        kernel_recovery: Dict with cosine similarity and L2 distance between the
-            recovered kernel (from generated M) and the ground-truth kernel.
-    """
     config_idx: int
     split: str
     family: str
@@ -166,10 +77,6 @@ class DatasetEval:
     kernel_recovery: Dict[str, float] = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Baseline methods
-# ---------------------------------------------------------------------------
-
 def eval_oracle_conv(
     x_test: torch.Tensor,
     y_test: torch.Tensor,
@@ -177,12 +84,6 @@ def eval_oracle_conv(
     y_train: torch.Tensor,
     kernel: torch.Tensor,
 ) -> MethodResult:
-    """Oracle convolution: apply the ground-truth kernel directly.
-
-    Uses ``conv1d_same`` (zero-padded 'same' convolution) with the ground-truth
-    kernel. This is the best possible conv model (it *is* the data-generating
-    process, minus noise).
-    """
     k_np = kernel.reshape(-1).cpu().numpy().astype(np.float32)
     x_test_np = x_test.cpu().numpy().astype(np.float32)
     x_train_np = x_train.cpu().numpy().astype(np.float32)
@@ -206,12 +107,6 @@ def train_learned_conv(
     lr: float = 3e-3,
     seed: int = 0,
 ) -> MethodResult:
-    """Train a ``Conv1dModel`` on the train split, evaluate on test.
-
-    The conv kernel size is set to the ground-truth kernel size (or the next odd
-    number >= it). The model has only K parameters (the conv weights), so it is
-    the inductive-bias model.
-    """
     device = torch.device(device)
     torch.manual_seed(seed)
     model = Conv1dModel(L=x_train.shape[1], kernel_size=kernel_size, bias=False)
@@ -249,13 +144,6 @@ def eval_from_scratch_mlp(
     device: Union[str, torch.device] = "cuda",
     seed: int = 0,
 ) -> MethodResult:
-    """Train an MLP from scratch on the train split, evaluate on test.
-
-    Uses the existing ``train_mlp_to_convergence``. The ``n_train`` parameter
-    controls how many training samples are used (subsample if the dataset has
-    more).
-    """
-    # Subsample if needed.
     if x_train.shape[0] > n_train:
         rng = np.random.default_rng(seed)
         idx = torch.from_numpy(rng.choice(x_train.shape[0], n_train,
@@ -283,33 +171,15 @@ def eval_from_scratch_mlp(
     )
 
 
-# ---------------------------------------------------------------------------
-# Toeplitz-ness and kernel recovery
-# ---------------------------------------------------------------------------
-
 def toeplitzness(M: torch.Tensor) -> float:
-    """Toeplitz-ness score: mean diagonal std (lower = more Toeplitz).
-
-    A Toeplitz matrix has constant diagonals (each diagonal ``d`` has all entries
-    equal to ``M[i, i+d]`` for valid ``i``). The score is the mean over all
-    diagonals of the std of that diagonal's entries. A perfect Toeplitz matrix
-    (e.g. the oracle convolution matrix) has score ~0.
-
-    Args:
-        M: ``[L, L]`` matrix.
-
-    Returns:
-        Scalar float (mean diagonal std). Lower = more Toeplitz.
-    """
+    """Toeplitz-ness score: mean diagonal std (lower = more Toeplitz)."""
     M = M.detach().cpu().float()
     L = M.shape[0]
     stds: List[float] = []
     for d in range(-(L - 1), L):
-        # Diagonal with offset d: entries M[i, i+d] for valid i.
         diag = torch.diagonal(M, offset=d, dim1=0, dim2=1)
         if diag.numel() > 1:
             stds.append(float(diag.std(unbiased=False).item()))
-        # else: single-element diagonal, std=0 (skip, contributes 0).
     if not stds:
         return 0.0
     return float(np.mean(stds))
@@ -319,18 +189,7 @@ def recover_kernel_from_matrix(
     M: torch.Tensor,
     max_radius: int = 3,
 ) -> torch.Tensor:
-    """Extract the implied kernel from a (near-)Toeplitz matrix.
-
-    Averages each diagonal of M to get the kernel tap for that offset. The
-    kernel is centered at offset 0 and has length ``2*max_radius + 1``.
-
-    Args:
-        M: ``[L, L]`` matrix.
-        max_radius: Maximum kernel radius (default 3 -> K=7).
-
-    Returns:
-        ``[2*max_radius+1]`` kernel vector (centered).
-    """
+    """Extract the implied kernel by averaging each diagonal of M."""
     M = M.detach().cpu().float()
     L = M.shape[0]
     K = 2 * max_radius + 1
@@ -347,22 +206,7 @@ def kernel_recovery(
     gt_kernel: torch.Tensor,
     max_radius: int = 3,
 ) -> Dict[str, float]:
-    """Compare the kernel recovered from generated M to the ground-truth kernel.
-
-    Args:
-        generated_M: ``[L, L]`` effective matrix to compare against the GT
-            kernel.
-        gt_kernel: ``[K_gt]`` ground-truth kernel.
-        max_radius: Maximum radius for the recovered kernel.
-
-    Returns:
-        Dict with:
-        - ``cosine_sim``: cosine similarity between recovered and GT kernel
-          (padded to the same length).
-        - ``l2_dist``: L2 distance between recovered and GT kernel.
-    """
     recovered = recover_kernel_from_matrix(generated_M, max_radius=max_radius)
-    # Pad/truncate the GT kernel to the recovered kernel length (center-align).
     K_rec = recovered.shape[0]
     K_gt = gt_kernel.shape[0]
     r_gt = K_gt // 2
@@ -372,7 +216,6 @@ def kernel_recovery(
         if 0 <= offset + j < K_rec:
             gt_padded[offset + j] = v
 
-    # Cosine similarity.
     a = recovered
     b = gt_padded
     na = a.norm()
@@ -385,10 +228,6 @@ def kernel_recovery(
     return {"cosine_sim": cos_sim, "l2_dist": l2}
 
 
-# ---------------------------------------------------------------------------
-# Per-dataset evaluation
-# ---------------------------------------------------------------------------
-
 def evaluate_one_dataset(
     config: Union[DatasetConfig, Dict],
     config_idx: int,
@@ -400,22 +239,6 @@ def evaluate_one_dataset(
     H: int = DEFAULT_H,
     seed: int = 0,
 ) -> DatasetEval:
-    """Run all 3 methods + Toeplitz-ness on one dataset.
-
-    Args:
-        config: Dataset config (dict or DatasetConfig).
-        config_idx: Index into configs.json.
-        split: "train" or "val".
-        n_train_mlp: n_train for the from-scratch MLP baseline.
-        device: torch device.
-        target_eff_map: Optional ``[D_eff]`` target effective map (from the
-            collected MLPs) for Toeplitz-ness comparison.
-        L, H: MLP dimensions.
-        seed: RNG seed.
-
-    Returns:
-        A ``DatasetEval`` with all results.
-    """
     device = torch.device(device)
     if isinstance(config, dict):
         ds_config = config_dict_to_datasetconfig(config)
@@ -428,7 +251,6 @@ def evaluate_one_dataset(
         radius = config.radius
         noise_std = config.noise_std
 
-    # Generate the dataset.
     x_train, y_train, x_test, y_test, kernel, _ = generate_dataset(ds_config)
     x_train = x_train.to(device)
     y_train = y_train.to(device)
@@ -444,22 +266,18 @@ def evaluate_one_dataset(
         noise_std=noise_std,
     )
 
-    # --- Method (a): from-scratch MLP ---
     result.methods["from_scratch_mlp"] = eval_from_scratch_mlp(
         x_train, y_train, x_test, y_test,
         n_train=n_train_mlp, device=device, seed=seed)
 
-    # --- Method (b): learned conv ---
     K = 2 * radius + 1
     result.methods["learned_conv"] = train_learned_conv(
         x_train, y_train, x_test, y_test,
         kernel_size=K, device=device, seed=seed)
 
-    # --- Method (c): oracle conv ---
     result.methods["oracle_conv"] = eval_oracle_conv(
         x_test, y_test, x_train, y_train, kernel)
 
-    # --- Toeplitz-ness ---
     oracle_M = effective_map_to_matrix(kernel_to_effective_map(kernel, L=L))
     result.toeplitzness["oracle"] = toeplitzness(oracle_M)
     if target_eff_map is not None:
@@ -468,10 +286,6 @@ def evaluate_one_dataset(
 
     return result
 
-
-# ---------------------------------------------------------------------------
-# Full evaluation over many datasets
-# ---------------------------------------------------------------------------
 
 def evaluate_datasets(
     configs: List[Dict],
@@ -487,26 +301,7 @@ def evaluate_datasets(
     seed: int = 0,
     verbose: bool = True,
 ) -> List[DatasetEval]:
-    """Evaluate all 3 methods on a sample of train + val configs.
-
-    Args:
-        configs: Full list of config dicts (from configs.json).
-        train_config_indices, val_config_indices: Config indices for train/val
-            splits.
-        n_eval_train, n_eval_val: Number of train/val configs to evaluate.
-        n_train_mlp: n_train for the from-scratch MLP baseline.
-        device: torch device.
-        target_eff_maps: Optional ``[n_configs, n_mlp, D_eff]`` target effective
-            maps (for Toeplitz-ness of the collected MLP targets).
-        L, H: MLP dimensions.
-        seed: RNG seed.
-        verbose: Print progress.
-
-    Returns:
-        List of ``DatasetEval`` (one per evaluated config).
-    """
     device = torch.device(device)
-    # Sample configs to evaluate (deterministic, same scheme across eval modules).
     all_indices = sample_eval_config_indices(
         train_config_indices, val_config_indices,
         n_eval_train, n_eval_val, seed)
@@ -520,7 +315,6 @@ def evaluate_datasets(
                   f"radius={configs[idx]['radius']})")
         target_eff = None
         if target_eff_maps is not None:
-            # Use the first MLP's effective map as the target representative.
             target_eff = target_eff_maps[idx, 0]
         res = evaluate_one_dataset(
             configs[idx], idx, split,
@@ -531,19 +325,7 @@ def evaluate_datasets(
     return results
 
 
-# ---------------------------------------------------------------------------
-# Aggregation + reporting
-# ---------------------------------------------------------------------------
-
 def aggregate_results(results: List[DatasetEval]) -> Dict[str, Any]:
-    """Aggregate per-dataset results into summary statistics.
-
-    Returns a dict with:
-    - ``by_method``: method -> {split -> {mean, std, n}} test MSE.
-    - ``toeplitzness``: source -> {split -> {mean, std}}.
-    - ``kernel_recovery``: {split -> {cosine_sim_mean, l2_dist_mean}}.
-    - ``relative_to_conv``: method -> {split -> mean} (method MSE / learned conv MSE).
-    """
     methods = ["from_scratch_mlp", "learned_conv", "oracle_conv"]
     splits = ["train", "val"]
 
@@ -650,10 +432,9 @@ def save_results(
     summary: Dict,
     output_dir: str,
 ) -> None:
-    """Save evaluation results (metrics) as JSON and CSV to ``output_dir``."""
+    """Save evaluation results (metrics) as JSON and CSV to output_dir."""
     os.makedirs(output_dir, exist_ok=True)
 
-    # Full per-dataset results as JSON.
     def _result_to_dict(r: DatasetEval) -> Dict:
         d = {
             "config_idx": r.config_idx,
@@ -671,11 +452,9 @@ def save_results(
     with open(os.path.join(output_dir, "results.json"), "w") as f:
         json.dump(full, f, indent=2)
 
-    # Summary as JSON.
     with open(os.path.join(output_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
 
-    # Summary as a flat CSV (one row per method x split).
     with open(os.path.join(output_dir, "summary.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["section", "name", "split", "mean", "std", "n"])

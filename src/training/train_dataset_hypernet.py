@@ -30,14 +30,12 @@ class DatasetHypernetConfig:
     seed: int = 0
     checkpoint_dir: str = "results/dataset_hypernet"
     resume: Optional[str] = None
-    # Model
-    K_enc: int = 32           # encoder example pairs
-    N_loss: int = 256         # loss evaluation points
-    d_model: int = 128        # transformer width
-    d_emb: int = 128          # embedding dim
-    n_layers: int = 1         # transformer layers
-    n_heads: int = 4          # attention heads
-    # Data
+    K_enc: int = 32
+    N_loss: int = 256
+    d_model: int = 128
+    d_emb: int = 128
+    n_layers: int = 1
+    n_heads: int = 4
     corpus_dir: str = "data/processed/targets_relu_h16"
     mlp_hidden: int = 16
 
@@ -64,12 +62,10 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
     print(f"[dataset_hypernet] device={device}")
     os.makedirs(config.checkpoint_dir, exist_ok=True)
 
-    # Load corpus
     bundle = load_relu_corpus(corpus_dir=config.corpus_dir)
     D = WeightCodec(L=32, H=config.mlp_hidden).D
     print(f"[dataset_hypernet] corpus: {bundle.n_configs} datasets x {bundle.n_mlp} MLPs, D={D}")
 
-    # Build model
     encoder = DatasetEncoder(
         L=32, K_enc=config.K_enc, d_model=config.d_model,
         d_emb=config.d_emb, n_layers=config.n_layers, n_heads=config.n_heads)
@@ -78,21 +74,17 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[dataset_hypernet] model params: {n_params:,}")
 
-    # Precompute datasets
     print("[dataset_hypernet] precomputing datasets...")
     dataset_cache = _precompute_datasets(bundle, device)
     print(f"[dataset_hypernet] cached {len(dataset_cache)} datasets")
 
-    # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     rng_gen = torch.Generator().manual_seed(config.seed)
 
-    # Validation: fixed 512 points per dataset for consistent eval.
     val_pts = {}
     for i in range(bundle.n_configs):
         x_all, y_all = dataset_cache[i]
         n = min(512, x_all.shape[0])
-        # Use first 512 points as fixed val batch.
         val_pts[i] = (x_all[:n], y_all[:n])
 
     step = 0
@@ -103,10 +95,8 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
     start_time = time.time()
 
     while step < config.max_steps:
-        # Sample dataset IDs.
         ds_np = np.random.default_rng().integers(0, bundle.n_configs, size=config.batch_size)
 
-        # Sample K_enc + N_loss random indices per dataset.
         x_enc, y_enc, x_loss, y_loss = [], [], [], []
         for i in range(config.batch_size):
             did = int(ds_np[i])
@@ -140,7 +130,6 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
             with torch.no_grad():
                 for did in range(bundle.n_configs):
                     x_all, y_all = val_pts[did]
-                    # Use first K_enc for encoder, rest for loss.
                     x_e = x_all[:config.K_enc].unsqueeze(0)
                     y_e = y_all[:config.K_enc].unsqueeze(0)
                     x_l = x_all[config.K_enc:].unsqueeze(0)
