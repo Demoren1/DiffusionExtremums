@@ -12,6 +12,7 @@ def parse_args(argv=None):
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--val-configs", type=int, default=20)
     p.add_argument("--checkpoint-dir", type=str, default="results/dataset_hypernet")
     p.add_argument("--k-enc", type=int, default=32)
     p.add_argument("--n-loss", type=int, default=256)
@@ -28,7 +29,7 @@ def main(argv=None):
     cfg = DatasetHypernetConfig(
         lr=args.lr, weight_decay=args.weight_decay, batch_size=args.batch_size,
         max_steps=args.max_steps, grad_clip=args.grad_clip,
-        device=args.device, seed=args.seed,
+        device=args.device, seed=args.seed, val_configs=args.val_configs,
         checkpoint_dir=args.checkpoint_dir,
         K_enc=args.k_enc, N_loss=args.n_loss,
         d_model=args.d_model, d_emb=args.d_emb,

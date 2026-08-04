@@ -28,6 +28,7 @@ class DatasetHypernetConfig:
     patience: int = 10
     device: str = "auto"
     seed: int = 0
+    val_configs: int = 20
     checkpoint_dir: str = "results/dataset_hypernet"
     resume: Optional[str] = None
     K_enc: int = 32
@@ -62,7 +63,7 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
     print(f"[dataset_hypernet] device={device}")
     os.makedirs(config.checkpoint_dir, exist_ok=True)
 
-    bundle = load_relu_corpus(corpus_dir=config.corpus_dir)
+    bundle = load_relu_corpus(corpus_dir=config.corpus_dir, val_configs=config.val_configs, seed=config.seed)
     D = WeightCodec(L=32, H=config.mlp_hidden).D
     print(f"[dataset_hypernet] corpus: {bundle.n_configs} datasets x {bundle.n_mlp} MLPs, D={D}")
 
@@ -82,7 +83,7 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
     rng_gen = torch.Generator().manual_seed(config.seed)
 
     val_pts = {}
-    for i in range(bundle.n_configs):
+    for i in bundle.val_cfg_indices:
         x_all, y_all = dataset_cache[i]
         n = min(512, x_all.shape[0])
         val_pts[i] = (x_all[:n], y_all[:n])
@@ -95,7 +96,7 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
     start_time = time.time()
 
     while step < config.max_steps:
-        ds_np = np.random.default_rng().integers(0, bundle.n_configs, size=config.batch_size)
+        ds_np = np.random.default_rng().choice(bundle.train_cfg_indices, size=config.batch_size)
 
         x_enc, y_enc, x_loss, y_loss = [], [], [], []
         for i in range(config.batch_size):
@@ -128,14 +129,14 @@ def train_dataset_hypernet(config: DatasetHypernetConfig) -> str:
             model.eval()
             total_val = 0.0
             with torch.no_grad():
-                for did in range(bundle.n_configs):
+                for did in bundle.val_cfg_indices:
                     x_all, y_all = val_pts[did]
                     x_e = x_all[:config.K_enc].unsqueeze(0)
                     y_e = y_all[:config.K_enc].unsqueeze(0)
                     x_l = x_all[config.K_enc:].unsqueeze(0)
                     y_l = y_all[config.K_enc:].unsqueeze(0)
                     total_val += model.compute_loss(x_e, y_e, x_l, y_l).item()
-            val_loss = total_val / bundle.n_configs
+            val_loss = total_val / len(bundle.val_cfg_indices)
             model.train()
             print(f"[dataset_hypernet] step {step} val loss {val_loss:.6g}")
 

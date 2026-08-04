@@ -15,6 +15,7 @@ N_LAYERS="${N_LAYERS:-1}"
 N_HEADS="${N_HEADS:-4}"
 DEVICE="${DEVICE:-cuda}"
 SEED="${SEED:-0}"
+VAL_CONFIGS="${VAL_CONFIGS:-20}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-results/dataset_hypernet}"
 CORPUS_DIR="${CORPUS_DIR:-data/processed/targets_relu_h16}"
 MLP_HIDDEN="${MLP_HIDDEN:-16}"
@@ -34,6 +35,6 @@ exec python -m src.scripts.train_dataset_hypernet \
     --k-enc "${K_ENC}" --n-loss "${N_LOSS}" \
     --d-model "${D_MODEL}" --d-emb "${D_EMB}" \
     --n-layers "${N_LAYERS}" --n-heads "${N_HEADS}" \
-    --device "${DEVICE}" --seed "${SEED}" \
+    --device "${DEVICE}" --seed "${SEED}" --val-configs "${VAL_CONFIGS}" \
     --checkpoint-dir "${CHECKPOINT_DIR}" \
     --corpus-dir "${CORPUS_DIR}" --mlp-hidden "${MLP_HIDDEN}"
